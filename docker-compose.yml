@@ -1,0 +1,81 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: lumen
+      POSTGRES_PASSWORD: lumen
+      POSTGRES_DB: lumen
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lumen"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: "postgresql+psycopg://lumen:lumen@postgres:5432/lumen"
+      SECRET_KEY: "change-me-in-production"
+      SYNC_INTERVAL_MINUTES: "15"
+      LOG_LEVEL: "INFO"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  test-ldap:
+    image: osixia/openldap:1.5.0
+    profiles: ["test"]
+    environment:
+      LDAP_ORGANISATION: "Test"
+      LDAP_DOMAIN: "test.local"
+      LDAP_ADMIN_PASSWORD: "adminpassword"
+      LDAP_SEED_INTERNAL_LDIF_PATH: "/ldifs"
+    ports:
+      - "1389:389"
+    volumes:
+      - ./test-fixtures/ldap:/ldifs:ro
+    healthcheck:
+      test: ["CMD", "ldapsearch", "-x", "-H", "ldap://localhost:389", "-b", "dc=test,dc=local", "-D", "cn=admin,dc=test,dc=local", "-w", "adminpassword"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  test-samba-ad:
+    image: smblds/smblds:latest
+    profiles: ["test"]
+    environment:
+      REALM: TEST.LOCAL
+      DOMAIN: TEST
+      ADMINPASS: Passw0rd
+      INSECURE_LDAP: "true"
+    ports:
+      - "2389:389"
+    volumes:
+      - ./test-fixtures/samba-ad:/entrypoint.d:ro
+    healthcheck:
+      test: ["CMD", "/usr/bin/ldapsearch", "-x", "-H", "ldap://localhost:389", "-b", "DC=test,DC=local", "-D", "CN=Administrator,CN=Users,DC=test,DC=local", "-w", "Passw0rd", "(objectClass=domain)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: "http://backend:8000"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:

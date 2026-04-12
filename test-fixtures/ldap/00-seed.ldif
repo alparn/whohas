@@ -1,0 +1,264 @@
+# =============================================================================
+# whohas Test LDAP Seed Data
+# =============================================================================
+#
+# Structure:
+#   dc=test,dc=local
+#   ├── ou=people          (15 users)
+#   │   ├── 10 normal active users
+#   │   ├── 2 disabled users (description: DISABLED)
+#   │   ├── 1 special chars user (Müller-Schäfer, Björn)
+#   │   ├── 1 user with no email
+#   │   └── 1 duplicate display name (same cn as another user)
+#   └── ou=groups          (8 groups)
+#       ├── flat-team               — 5 direct user members, no nesting
+#       ├── empty-group             — 0 members
+#       ├── database-experts        — 2 users (leaf of nested chain)
+#       ├── backend-team            — contains database-experts + 1 user
+#       ├── engineering-all         — contains backend-team
+#       ├── marketing-team          — 2 users (one shared with database-experts)
+#       ├── all-staff               — contains engineering-all + marketing-team (diamond)
+#       └── single-user-group       — 1 user only
+#
+# Nesting:
+#   all-staff
+#   ├── engineering-all
+#   │   └── backend-team
+#   │       └── database-experts
+#   │           ├── alice.wong
+#   │           └── carlos.garcia    ← also in marketing-team (diamond)
+#   └── marketing-team
+#       ├── carlos.garcia           ← reachable via two paths
+#       └── diana.ross
+#
+# =============================================================================
+
+# --- Organizational Units ---------------------------------------------------
+
+dn: ou=people,dc=test,dc=local
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,dc=test,dc=local
+objectClass: organizationalUnit
+ou: groups
+
+# --- Users (15 total) -------------------------------------------------------
+
+# 1. Normal active user
+dn: uid=john.doe,ou=people,dc=test,dc=local
+objectClass: inetOrgPerson
+uid: john.doe
+cn: John Doe
+sn: Doe
+givenName: John
+mail: john.doe@test.local
+userPassword: password123
+
+# 2. Normal active user
+dn: uid=jane.smith,ou=people,dc=test,dc=local
+objectClass: inetOrgPerson
+uid: jane.smith
+cn: Jane Smith
+sn: Smith
+givenName: Jane
+mail: jane.smith@test.local
+userPassword: password123
+
+# 3. Normal active user
+dn: uid=alice.wong,ou=people,dc=test,dc=local
+objectClass: inetOrgPerson
+uid: alice.wong
+cn: Alice Wong
+sn: Wong
+givenName: Alice
+mail: alice.wong@test.local
+userPassword: password123
+
+# 4. Normal active user (also in marketing — diamond pattern)
+dn: uid=carlos.garcia,ou=people,dc=test,dc=local
+objectClass: inetOrgPerson
+uid: carlos.garcia
+cn: Carlos Garcia
+sn: Garcia
+givenName: Carlos
+mail: carlos.garcia@test.local
+userPassword: password123
+
+# 5. Normal active user
+dn: uid=diana.ross,ou=people,dc=test,dc=local
+objectClass: inetOrgPerson
+uid: diana.ross
+cn: Diana Ross
+sn: Ross
+givenName: Diana
+mail: diana.ross@test.local
+userPassword: password123
+
+# 6. Normal active user
+dn: uid=erik.larsson,ou=people,dc=test,dc=local
+objectClass: inetOrgPerson
+uid: erik.larsson
+cn: Erik Larsson
+sn: Larsson
+givenName: Erik
+mail: erik.larsson@test.local
+userPassword: password123
+
+# 7. Normal active user
+dn: uid=fatima.khan,ou=people,dc=test,dc=local
+objectClass: inetOrgPerson
+uid: fatima.khan
+cn: Fatima Khan
+sn: Khan
+givenName: Fatima
+mail: fatima.khan@test.local
+userPassword: password123
+
+# 8. Normal active user
+dn: uid=george.chen,ou=people,dc=test,dc=local
+objectClass: inetOrgPerson
+uid: george.chen
+cn: George Chen
+sn: Chen
+givenName: George
+mail: george.chen@test.local
+userPassword: password123
+
+# 9. Normal active user
+dn: uid=hannah.fischer,ou=people,dc=test,dc=local
+objectClass: inetOrgPerson
+uid: hannah.fischer
+cn: Hannah Fischer
+sn: Fischer
+givenName: Hannah
+mail: hannah.fischer@test.local
+userPassword: password123
+
+# 10. Normal active user
+dn: uid=ivan.petrov,ou=people,dc=test,dc=local
+objectClass: inetOrgPerson
+uid: ivan.petrov
+cn: Ivan Petrov
+sn: Petrov
+givenName: Ivan
+mail: ivan.petrov@test.local
+userPassword: password123
+
+# 11. DISABLED user
+dn: uid=disabled.user1,ou=people,dc=test,dc=local
+objectClass: inetOrgPerson
+uid: disabled.user1
+cn: Disabled User One
+sn: One
+givenName: Disabled
+mail: disabled1@test.local
+userPassword: password123
+description: DISABLED
+
+# 12. DISABLED user
+dn: uid=disabled.user2,ou=people,dc=test,dc=local
+objectClass: inetOrgPerson
+uid: disabled.user2
+cn: Disabled User Two
+sn: Two
+givenName: Disabled
+mail: disabled2@test.local
+userPassword: password123
+description: DISABLED
+
+# 13. Special characters (umlauts)
+dn: uid=bjoern.mueller,ou=people,dc=test,dc=local
+objectClass: inetOrgPerson
+uid: bjoern.mueller
+cn:: QmrDtnJuIE3DvGxsZXItU2Now6RmZXI=
+sn:: TcO8bGxlci1TY2jDpGZlcg==
+givenName:: QmrDtnJu
+mail: bjoern.mueller@test.local
+userPassword: password123
+
+# 14. User with NO email
+dn: uid=noemail.user,ou=people,dc=test,dc=local
+objectClass: inetOrgPerson
+uid: noemail.user
+cn: NoEmail User
+sn: User
+givenName: NoEmail
+userPassword: password123
+
+# 15. Duplicate display name (same cn as John Doe)
+dn: uid=john.doe2,ou=people,dc=test,dc=local
+objectClass: inetOrgPerson
+uid: john.doe2
+cn: John Doe
+sn: Doe
+givenName: John
+mail: john.doe2@test.local
+userPassword: password123
+
+# --- Groups (8 total) -------------------------------------------------------
+
+# 1. flat-team — 5 direct user members, no nesting
+dn: cn=flat-team,ou=groups,dc=test,dc=local
+objectClass: groupOfNames
+cn: flat-team
+description: Flat team with 5 direct members
+member: uid=john.doe,ou=people,dc=test,dc=local
+member: uid=jane.smith,ou=people,dc=test,dc=local
+member: uid=erik.larsson,ou=people,dc=test,dc=local
+member: uid=fatima.khan,ou=people,dc=test,dc=local
+member: uid=george.chen,ou=people,dc=test,dc=local
+
+# 2. empty-group — no members (groupOfNames requires at least one member,
+#    so we use a placeholder DN pointing to a non-person entry)
+dn: cn=empty-group,ou=groups,dc=test,dc=local
+objectClass: groupOfNames
+cn: empty-group
+description: Empty group for stale detection
+member: cn=empty-group,ou=groups,dc=test,dc=local
+
+# 3. database-experts — leaf of nested chain, 2 users
+dn: cn=database-experts,ou=groups,dc=test,dc=local
+objectClass: groupOfNames
+cn: database-experts
+description: Database team - leaf of nesting chain
+member: uid=alice.wong,ou=people,dc=test,dc=local
+member: uid=carlos.garcia,ou=people,dc=test,dc=local
+
+# 4. backend-team — contains database-experts + 1 extra user
+dn: cn=backend-team,ou=groups,dc=test,dc=local
+objectClass: groupOfNames
+cn: backend-team
+description: Backend team - contains database-experts
+member: cn=database-experts,ou=groups,dc=test,dc=local
+member: uid=hannah.fischer,ou=people,dc=test,dc=local
+
+# 5. engineering-all — contains backend-team
+dn: cn=engineering-all,ou=groups,dc=test,dc=local
+objectClass: groupOfNames
+cn: engineering-all
+description: All engineering - contains backend-team
+member: cn=backend-team,ou=groups,dc=test,dc=local
+
+# 6. marketing-team — 2 users, one shared with database-experts (diamond)
+dn: cn=marketing-team,ou=groups,dc=test,dc=local
+objectClass: groupOfNames
+cn: marketing-team
+description: Marketing team - shares carlos.garcia with engineering path
+member: uid=carlos.garcia,ou=people,dc=test,dc=local
+member: uid=diana.ross,ou=people,dc=test,dc=local
+
+# 7. all-staff — diamond: contains engineering-all + marketing-team
+dn: cn=all-staff,ou=groups,dc=test,dc=local
+objectClass: groupOfNames
+cn: all-staff
+description: All staff - diamond pattern root
+member: cn=engineering-all,ou=groups,dc=test,dc=local
+member: cn=marketing-team,ou=groups,dc=test,dc=local
+
+# 8. single-user-group — 1 user only
+dn: cn=single-user-group,ou=groups,dc=test,dc=local
+objectClass: groupOfNames
+cn: single-user-group
+description: Single user for permission isolation
+member: uid=ivan.petrov,ou=people,dc=test,dc=local
