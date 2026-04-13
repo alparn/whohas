@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 _MATERIALIZE_SQL = text("""
 WITH RECURSIVE membership_graph AS (
-    -- Base case: direct user→group edges (depth 0)
+    -- Base case: direct user→group edges (depth 0), excluding stale users/groups
     SELECT
         dm.directory_id,
         dm.child_dn   AS user_dn,
@@ -26,12 +26,18 @@ WITH RECURSIVE membership_graph AS (
         0              AS depth,
         jsonb_build_array(dm.parent_dn) AS path
     FROM direct_memberships dm
+    JOIN directory_users du
+      ON du.directory_id = dm.directory_id AND du.dn = dm.child_dn
+    JOIN directory_groups pg
+      ON pg.directory_id = dm.directory_id AND pg.dn = dm.parent_dn
     WHERE dm.directory_id = :directory_id
       AND dm.child_type = 'USER'
+      AND du.stale = false
+      AND pg.stale = false
 
     UNION ALL
 
-    -- Recursive case: follow group→group edges upward
+    -- Recursive case: follow group→group edges upward, excluding stale groups
     SELECT
         mg.directory_id,
         mg.user_dn,
@@ -43,7 +49,10 @@ WITH RECURSIVE membership_graph AS (
       ON dm.directory_id = mg.directory_id
      AND dm.child_dn = mg.group_dn
      AND dm.child_type = 'GROUP'
+    JOIN directory_groups dg
+      ON dg.directory_id = dm.directory_id AND dg.dn = dm.parent_dn
     WHERE mg.depth < 20
+      AND dg.stale = false
 )
 INSERT INTO effective_memberships (id, directory_id, user_dn, group_dn, depth, path, created_at)
 SELECT

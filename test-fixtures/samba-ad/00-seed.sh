@@ -48,6 +48,11 @@ create_user() {
     local display="$4"
     local mail="${5:-}"
 
+    if samba-tool user show "$sam" >/dev/null 2>&1; then
+        echo "User '$sam' already exists — skipping"
+        return 0
+    fi
+
     local mail_opt=""
     if [ -n "$mail" ]; then
         mail_opt="--mail-address=${mail}"
@@ -103,8 +108,8 @@ create_user "ivan.petrov"    "Ivan"    "Petrov"    "Ivan Petrov"            "iva
 create_user "disabled.user1" "Disabled" "One"      "Disabled User One"      "disabled1@test.local"
 create_user "disabled.user2" "Disabled" "Two"      "Disabled User Two"      "disabled2@test.local"
 
-samba-tool user disable disabled.user1
-samba-tool user disable disabled.user2
+samba-tool user disable disabled.user1 2>/dev/null || true
+samba-tool user disable disabled.user2 2>/dev/null || true
 
 # 13: Special characters (umlauts)
 create_user "bjoern.mueller" "Björn"   "Müller-Schäfer" "Björn Müller-Schäfer" "bjoern.mueller@test.local"
@@ -131,37 +136,46 @@ set_last_logon "Disabled Two"      "0"
 
 # ---- Groups (8 total) ------------------------------------------------------
 
-samba-tool group add flat-team
-samba-tool group add empty-group
-samba-tool group add database-experts
-samba-tool group add backend-team
-samba-tool group add engineering-all
-samba-tool group add marketing-team
-samba-tool group add all-staff
-samba-tool group add single-user-group
+add_group() {
+    local name="$1"
+    if samba-tool group show "$name" >/dev/null 2>&1; then
+        echo "Group '$name' already exists — skipping"
+        return 0
+    fi
+    samba-tool group add "$name"
+}
+
+add_group flat-team
+add_group empty-group
+add_group database-experts
+add_group backend-team
+add_group engineering-all
+add_group marketing-team
+add_group all-staff
+add_group single-user-group
 
 # ---- Group memberships -----------------------------------------------------
 
 # flat-team: 5 direct user members
-samba-tool group addmembers flat-team john.doe,jane.smith,erik.larsson,fatima.khan,george.chen
+samba-tool group addmembers flat-team john.doe,jane.smith,erik.larsson,fatima.khan,george.chen 2>/dev/null || true
 
 # database-experts: 2 users (leaf of nested chain)
-samba-tool group addmembers database-experts alice.wong,carlos.garcia
+samba-tool group addmembers database-experts alice.wong,carlos.garcia 2>/dev/null || true
 
 # backend-team: database-experts (nested group) + 1 user
-samba-tool group addmembers backend-team database-experts,hannah.fischer
+samba-tool group addmembers backend-team database-experts,hannah.fischer 2>/dev/null || true
 
 # engineering-all: backend-team (nested group)
-samba-tool group addmembers engineering-all backend-team
+samba-tool group addmembers engineering-all backend-team 2>/dev/null || true
 
 # marketing-team: 2 users (carlos.garcia shared with database-experts = diamond)
-samba-tool group addmembers marketing-team carlos.garcia,diana.ross
+samba-tool group addmembers marketing-team carlos.garcia,diana.ross 2>/dev/null || true
 
 # all-staff: engineering-all + marketing-team (diamond root)
-samba-tool group addmembers all-staff engineering-all,marketing-team
+samba-tool group addmembers all-staff engineering-all,marketing-team 2>/dev/null || true
 
 # single-user-group: 1 user
-samba-tool group addmembers single-user-group ivan.petrov
+samba-tool group addmembers single-user-group ivan.petrov 2>/dev/null || true
 
 # empty-group: intentionally left with no members
 

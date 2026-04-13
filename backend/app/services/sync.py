@@ -26,6 +26,30 @@ logger = logging.getLogger(__name__)
 _UAC_ACCOUNTDISABLE = 0x0002
 
 
+def _extract_guid(entry: dict[str, Any]) -> str | None:
+    """Extract a stable GUID from an LDAP entry.
+
+    AD delivers ``objectGUID`` as raw bytes (which ldap3 + _make_json_safe
+    turns into a hex string).  OpenLDAP delivers ``entryUUID`` as a plain
+    UUID string.
+    """
+    for key in ("objectGUID", "entryUUID"):
+        val = entry.get(key)
+        if not val:
+            continue
+        if isinstance(val, bytes):
+            return str(uuid.UUID(bytes_le=val))
+        s = str(val)
+        if len(s) == 32 and all(c in "0123456789abcdefABCDEF" for c in s):
+            # hex-encoded bytes produced by _make_json_safe for objectGUID
+            return str(uuid.UUID(bytes_le=bytes.fromhex(s)))
+        try:
+            return str(uuid.UUID(s))
+        except ValueError:
+            logger.warning("Ignoring unparseable GUID value %r from key %s", val, key)
+    return None
+
+
 def sync_directory(directory_id: uuid.UUID) -> None:
     """Run a full LDAP sync for the given directory.
 
@@ -50,12 +74,15 @@ def sync_directory(directory_id: uuid.UUID) -> None:
         )
         try:
             client.connect()
+            sync_started_at = datetime.utcnow()
 
             users = client.search_users()
             user_count = _upsert_users(session, directory.id, users)
 
             groups = client.search_groups()
             group_count = _upsert_groups(session, directory.id, groups)
+
+            stale_counts = _mark_stale(session, directory.id, sync_started_at)
 
             _extract_memberships(session, directory.id, groups)
             membership_count = materialize_effective_memberships(directory.id, session)
@@ -74,12 +101,17 @@ def sync_directory(directory_id: uuid.UUID) -> None:
                 "users": user_count,
                 "groups": group_count,
                 "effective_memberships": membership_count,
+                "stale_users": stale_counts["users"],
+                "stale_groups": stale_counts["groups"],
             })
             logger.info(
-                "Sync completed for %s — %d users, %d groups",
+                "Sync completed for %s — %d users, %d groups, "
+                "%d stale users, %d stale groups",
                 directory.name,
                 user_count,
                 group_count,
+                stale_counts["users"],
+                stale_counts["groups"],
             )
 
         except Exception:
@@ -124,11 +156,25 @@ def _upsert_users(
         if not dn:
             continue
 
-        stmt = select(DirectoryUser).where(
-            DirectoryUser.directory_id == directory_id,
-            DirectoryUser.dn == dn,
-        )
-        existing = session.exec(stmt).first()
+        guid = _extract_guid(entry)
+
+        # GUID-first lookup, DN-fallback
+        existing: DirectoryUser | None = None
+        if guid:
+            existing = session.exec(
+                select(DirectoryUser).where(
+                    DirectoryUser.directory_id == directory_id,
+                    DirectoryUser.guid == guid,
+                )
+            ).first()
+
+        if existing is None:
+            existing = session.exec(
+                select(DirectoryUser).where(
+                    DirectoryUser.directory_id == directory_id,
+                    DirectoryUser.dn == dn,
+                )
+            ).first()
 
         uac = _safe_int(entry.get("userAccountControl", 0))
         disabled = bool(uac & _UAC_ACCOUNTDISABLE)
@@ -139,11 +185,14 @@ def _upsert_users(
         sam = str(entry.get("sAMAccountName", "") or entry.get("uid", ""))
 
         if existing:
+            existing.dn = dn
+            existing.guid = guid or existing.guid
             existing.sam_account_name = sam
             existing.display_name = str(entry.get("displayName", entry.get("cn", "")))
             existing.mail = entry.get("mail")
             existing.last_logon = last_logon
             existing.account_disabled = disabled
+            existing.stale = False
             existing.raw_attributes = entry
             existing.last_seen_at = now
             session.add(existing)
@@ -151,6 +200,7 @@ def _upsert_users(
             user = DirectoryUser(
                 directory_id=directory_id,
                 dn=dn,
+                guid=guid,
                 sam_account_name=sam,
                 display_name=str(entry.get("displayName", entry.get("cn", ""))),
                 mail=entry.get("mail"),
@@ -181,16 +231,33 @@ def _upsert_groups(
         if not dn:
             continue
 
-        stmt = select(DirectoryGroup).where(
-            DirectoryGroup.directory_id == directory_id,
-            DirectoryGroup.dn == dn,
-        )
-        existing = session.exec(stmt).first()
+        guid = _extract_guid(entry)
+
+        # GUID-first lookup, DN-fallback
+        existing: DirectoryGroup | None = None
+        if guid:
+            existing = session.exec(
+                select(DirectoryGroup).where(
+                    DirectoryGroup.directory_id == directory_id,
+                    DirectoryGroup.guid == guid,
+                )
+            ).first()
+
+        if existing is None:
+            existing = session.exec(
+                select(DirectoryGroup).where(
+                    DirectoryGroup.directory_id == directory_id,
+                    DirectoryGroup.dn == dn,
+                )
+            ).first()
 
         if existing:
+            existing.dn = dn
+            existing.guid = guid or existing.guid
             existing.name = str(entry.get("cn", entry.get("name", "")))
             existing.description = entry.get("description")
             existing.group_type = str(entry.get("groupType", "")) or None
+            existing.stale = False
             existing.raw_attributes = entry
             existing.last_seen_at = now
             session.add(existing)
@@ -198,6 +265,7 @@ def _upsert_groups(
             group = DirectoryGroup(
                 directory_id=directory_id,
                 dn=dn,
+                guid=guid,
                 name=str(entry.get("cn", entry.get("name", ""))),
                 description=entry.get("description"),
                 group_type=str(entry.get("groupType", "")) or None,
@@ -210,6 +278,53 @@ def _upsert_groups(
 
     session.commit()
     return count
+
+
+def _mark_stale(
+    session: Session,
+    directory_id: uuid.UUID,
+    sync_started_at: datetime,
+) -> dict[str, int]:
+    """Mark users/groups not seen during this sync run as stale.
+
+    Any row whose ``last_seen_at`` is older than *sync_started_at* was not
+    returned by LDAP and is therefore considered stale.  Returns a dict with
+    the number of newly stale users and groups.
+    """
+    user_result = session.execute(
+        text("""
+            UPDATE directory_users
+            SET stale = true
+            WHERE directory_id = :did
+              AND last_seen_at < :cutoff
+              AND stale = false
+        """),
+        {"did": directory_id, "cutoff": sync_started_at},
+    )
+    group_result = session.execute(
+        text("""
+            UPDATE directory_groups
+            SET stale = true
+            WHERE directory_id = :did
+              AND last_seen_at < :cutoff
+              AND stale = false
+        """),
+        {"did": directory_id, "cutoff": sync_started_at},
+    )
+    session.commit()
+
+    stale_users = user_result.rowcount  # type: ignore[union-attr]
+    stale_groups = group_result.rowcount  # type: ignore[union-attr]
+
+    if stale_users or stale_groups:
+        logger.info(
+            "Marked %d users and %d groups as stale for directory %s",
+            stale_users,
+            stale_groups,
+            directory_id,
+        )
+
+    return {"users": stale_users, "groups": stale_groups}
 
 
 def _extract_memberships(

@@ -30,6 +30,7 @@ COPY alembic/ ./alembic/
 COPY app/ ./app/
 
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
 
 RUN chown -R app:app /app
 USER app
